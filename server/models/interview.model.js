@@ -1,59 +1,68 @@
 import mongoose from "mongoose";
 
-const questionsSchema = new mongoose.Schema({
-    question: String,
-    difficulty: String,
-    timeLimit: Number,
-    answer: String,
-    feedback: String,
-    score: { type: Number, default: 0 },
-    confidence: { type: Number, default: 0 },
-    communication: { type: Number, default: 0 },
-    correctness: { type: Number, default: 0 }
-});
-
-const interviewSchema = new mongoose.Schema({
-
+const interviewSchema = new mongoose.Schema(
+  {
     userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true
     },
 
-    role: {
-        type: String,
-        required: true
+    jobRole: {
+      type: String,
+      required: true
     },
 
     experience: {
-        type: String,
-        required: true
+      type: Number,
+      required: true
     },
 
-    mode: {
-        type: String,
-        enum: ["HR", "Technical"],
-        required: true
+    interviewType: {
+      type: String,
+      required: true
+    },
+
+    resume: {
+      type: String
     },
 
     resumeText: {
-        type: String
+      type: String
     },
 
-    questions: [questionsSchema],
+    questions: [
+      {
+        question: {
+          type: String
+        },
 
-    finalScore: {
-        type: Number,
-        default: 0
+        answer: {
+          type: String,
+          default: ""
+        },
+
+        feedback: {
+          type: String,
+          default: ""
+        }
+      }
+    ],
+
+    score: {
+      type: Number,
+      default: 0
     },
 
-    status: {
-        type: String,
-        enum: ["Incomplete", "completed"],
-        default: "Incomplete"
+    report: {
+      type: String,
+      default: ""
     }
-
-}, { timestamps: true });
+  },
+  {
+    timestamps: true
+  }
+);
 
 const Interview = mongoose.model("Interview", interviewSchema);
 

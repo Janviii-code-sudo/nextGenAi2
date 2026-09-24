@@ -17,8 +17,10 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.2",
-    "multer": "^2.4.0",
+    "multer": "^2.3.0",
     "nodemon": "^3.1.14",
-    "pdfjs-dist": "^6.3.289"
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^6.3.289",
+    "razorpay": "^2.9.8"
   }
 }

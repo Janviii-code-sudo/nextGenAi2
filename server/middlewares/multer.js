@@ -1,36 +1,44 @@
+
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const uploadDir = "public";
 
-const uploadPath = path.join(__dirname, "../public");
-
-if (!fs.existsSync(uploadPath)) {
-    fs.mkdirSync(uploadPath, { recursive: true });
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
 
-    destination: function (req, file, cb) {
-        cb(null, uploadPath);
-    },
+  filename: (req, file, cb) => {
+    const uniqueName =
+      Date.now() +
+      "-" +
+      Math.round(Math.random() * 1e9) +
+      path.extname(file.originalname);
 
-    filename: function (req, file, cb) {
-        const filename = Date.now() + "_" + file.originalname;
-        cb(null, filename);
-    }
-
+    cb(null, uniqueName);
+  }
 });
 
-export const upload = multer({
+const upload = multer({
+  storage,
 
-    storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024
+  },
 
-    limits: {
-        fileSize: 5 * 1024 * 1024
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF files are allowed"));
     }
-
+  }
 });
+
+export default upload;
