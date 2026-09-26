@@ -31,6 +31,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
 
     const videoRef = useRef(null);
+    const isRecognitionRunningRef = useRef(false);
 
     const currentQuestion = questions[currentIndex];
     useEffect(() => {
@@ -38,37 +39,33 @@ function Step2Interview({ interviewData, onFinish }) {
         const voices = window.speechSynthesis.getVoices();
         if (!voices.length) return;
 
-        // Try known Google voices first
         const femaleVoice = voices.find(v => 
             v.name.toLowerCase().includes("zira") ||
             v.name.toLowerCase().includes("samantha") ||
             v.name.toLowerCase().includes("female")
         );
-
         if (femaleVoice) {
             setSelectedVoice(femaleVoice);
             setVoiceGender("female");
             return;
         }
 
-        // Try known male voices
-        const maleVoice = 
-            voices.find(v => 
-                v.name.toLowerCase().includes("david") ||
-                v.name.toLowerCase().includes("mark") ||
-                v.name.toLowerCase().includes("male")
-            );
+        const maleVoice = voices.find(v => 
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("mark") ||
+            v.name.toLowerCase().includes("male")
+        );
 
-            if (maleVoice) {
-                setSelectedVoice(maleVoice);
-                setVoiceGender("male");
-                return;
-            }
-            };
-            // fallback: first voice (assume it's female)
-            setSelectedVoice(voices[0]);
-            setVoiceGender("female");
+        if (maleVoice) {
+            setSelectedVoice(maleVoice);
+            setVoiceGender("male");
+            return;
+        }
 
+        // Fallback inside loadVoices block
+        setSelectedVoice(voices[0]);
+        setVoiceGender("female");
+    }; 
             loadVoices();
                 window.speechSynthesis.onvoiceschanged = loadVoices;
         }, []);
@@ -104,7 +101,9 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.onend = () => {
   
                         videoRef.current?.pause();
-                        videoRef.current.currentTime = 0;
+                            if (videoRef.current) {
+                                videoRef.current.currentTime = 0;
+                            }
                         setIsAiPlaying(false);
 
                         if(isMicOn) startMic(); // Restart mic if it was on before
@@ -125,15 +124,13 @@ function Step2Interview({ interviewData, onFinish }) {
 
             const runIntro = async () => {
                 if(isIntroPhase) {
-                await speakText(
-                `Hi ${userName}, it's great to meet you today. I hope you're feeling confident and ready.`
-                );
+                const { interviewId, questions = [], userRole, userName = "Candidate" } = interviewData;
 
                 await speakText(
                 "I'll ask you a few questions. Just answer naturally, take your time. Let's begin."
                 );
 
-                setIntroPhase(false)}
+                setIsIntroPhase(false);}
                 else if (currentQuestion){
                     await new Promise(r => setTimeout(r, 800)); 
                     // if last ques (hard level)
@@ -171,11 +168,10 @@ function Step2Interview({ interviewData, onFinish }) {
 
                 
                 useEffect(() => {
-                if (isIntroPhase && currentQuestion) {
-                    setTimeLeft(currentQuestion.timeLimit || 60);
-                }
-                },  [currentIndex]);
-
+                    if (currentQuestion) {
+                        setTimeLeft(currentQuestion.timeLimit || 60);
+                    }
+                }, [currentIndex, isIntroPhase]);
                 useEffect(() => {
                 if (!("webkitSpeechRecognition" in window)) return;
 
@@ -189,15 +185,24 @@ function Step2Interview({ interviewData, onFinish }) {
                     const transcript = event.results[event.results.length - 1][0].transcript;
                     setAnswer((prev) => prev + " " + transcript);
                 };
+                recognition.onend = () => {
+                    isRecognitionRunningRef.current = false;
+                };
 
                 recognitionRef.current = recognition;
                 }, []);
-
                 const startMic = () => {
-                    if (recognitionRef.current &&  !isAiPlaying) {
-                        try{
+                    if (
+                        recognitionRef.current &&
+                        !isAiPlaying &&
+                        !isRecognitionRunningRef.current
+                    ) {
+                        try {
                             recognitionRef.current.start();
-                        } catch{ }
+                            isRecognitionRunningRef.current = true;
+                        } catch (err) {
+                            console.warn("Speech recognition couldn't start:", err);
+                        }
                     }
                 };
                 
@@ -258,12 +263,7 @@ function Step2Interview({ interviewData, onFinish }) {
             // Move to next question
             setCurrentIndex((prevIndex) => prevIndex + 1);
 
-            // Start microphone after small delay
-            setTimeout(() => {
-                if (isMicOn) {
-                    startMic();
-                }
-            }, 500);
+        
         };
         const finishInterview = async () => {
             stopMic();
@@ -285,8 +285,8 @@ function Step2Interview({ interviewData, onFinish }) {
                 if (!currentQuestion) return;
 
                 if (timeLeft === 0 && !isSubmitting && !feedback) {
-                    handleSubmit();
-                }
+                    submitAnswer();
+                    }
                 }, [timeLeft]);
 
                 useEffect(() => {
@@ -303,9 +303,9 @@ function Step2Interview({ interviewData, onFinish }) {
 
           const videoSource = voiceGender === "male" ? maleVideo : femaleVideo;
     return (
-        <div className='min-h-screen bg-linear-to-br from-emerald-50 via-white to-teal-100 flex items-center justify-center p-4 sm:p-6'>
+        <div className='min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-100 flex items-center justify-center p-4 sm:p-6'>
 
-            <div className='w-full max-w-350 min-h-[80vh] bg-white rounded-3xl shadow-2xl border border-gray-200 flex flex-col lg:flex-row overflow-hidden'>
+            <div className='w-full max-w-[1200] min-h-[80vh] bg-white rounded-3xl shadow-2xl border border-gray-200 flex flex-col lg:flex-row overflow-hidden'>
 
                 {/* Video section */}
                 <div className='w-full lg:w-[35%] bg-white flex flex-col items-center p-6 space-y-6 border-r border-gray-200'>
@@ -362,7 +362,7 @@ function Step2Interview({ interviewData, onFinish }) {
                         <div className='grid grid-cols-2 gap-6 text-center'>
                         <div>
                             <span className='text-2xl font-bold text-emerald-600'>{currentIndex + 1}</span>
-                            <span className='text-xs text-gray-400'>Current Questions</span>
+                            <span className='text-xs text-gray-400'>Current Question</span>
                         </div>
                         <div className='h-px bg-gray-200'></div>
                         <div>

@@ -307,15 +307,33 @@ function Step1SetUp({ onStart }) {
                                     id='resumeUpload'
                                     accept='.pdf,.doc,.docx'
                                     className='hidden'
-                                    onChange={(e) => {
-
+                                    onChange={async (e) => {
                                         const file = e.target.files[0];
-
+                                        if (!file) return;
                                         setResumeFile(file);
                                         setAnalysisDone(false);
-
-                                        console.log("Selected resume:", file);
-
+                                        
+                                        // Automatically upload & analyze
+                                        setAnalyzing(true);
+                                        try {
+                                            const formdata = new FormData();
+                                            formdata.append("resume", file);
+                                            const result = await axios.post(
+                                                ServerUrl + "/api/interview/resume",
+                                                formdata,
+                                                { withCredentials: true }
+                                            );
+                                            setRole(result.data.role || "");
+                                            setExperience(result.data.experience || "");
+                                            setProjects(result.data.projects || []);
+                                            setSkills(result.data.skills || []);
+                                            setResumeText(result.data.resumeText || "");
+                                            setAnalysisDone(true);
+                                        } catch (error) {
+                                            console.error("RESUME ANALYSIS ERROR:", error);
+                                        } finally {
+                                            setAnalyzing(false);
+                                        }
                                     }}
                                 />
 
@@ -455,7 +473,7 @@ function Step1SetUp({ onStart }) {
                             whileTap={{ scale: 0.95 }}
                             className='w-full disabled:bg-gray-600 bg-green-600 hover:bg-green-700 text-white py-3 rounded-full text-lg font-semibold transition duration-300 shadow-md'
                         >
-                            {loading ? "Starting..." : "Start Interview"}
+                           {loading ? "Starting..." : "Start Interview"}
                         </motion.button>
 
 

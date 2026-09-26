@@ -17,8 +17,7 @@ interviewRouter.post("/resume", isAuth, upload.single("resume"), analyzeResume);
 
 interviewRouter.post("/generate-questions", isAuth, generateQuestion);
 
-interviewRouter.post("/submit-answer", isAuth, submitAnswer);
-
+interviewRouter.post("/:interviewId/submit-answer", isAuth, submitAnswer);
 interviewRouter.post("/finish", isAuth, finishInterview);
 
 export default interviewRouter;
