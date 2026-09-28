@@ -41,7 +41,7 @@ function Auth({ isModel = false }) {
 
         try {
 
-            // Google Login
+           
             const response = await signInWithPopup(
                 auth,
                 provider
@@ -136,7 +136,7 @@ function Auth({ isModel = false }) {
 
                     <h2 className='font-semibold text-lg'>
 
-                        InterviewIQ.AI
+                        Next-GenAI
 
                     </h2>
 

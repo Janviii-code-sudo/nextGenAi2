@@ -19,7 +19,7 @@ function Footer() {
 
                     <h2 className='font-semibold'>
 
-                        InterviewIQ.AI
+                        Next-GenAI
 
                     </h2>
 

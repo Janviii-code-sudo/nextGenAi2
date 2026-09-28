@@ -72,7 +72,7 @@ function Navbar() {
 
                     <h1 className='font-semibold text-lg'>
 
-                        InterviewIQ.AI
+                        Next-GenAI
 
                     </h1>
 
