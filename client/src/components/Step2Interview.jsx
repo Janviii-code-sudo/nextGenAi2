@@ -3,7 +3,11 @@ import maleVideo from "../assets/videos/male-ai.mp4"
 import femaleVideo from "../assets/videos/female-ai.mp4"
 import Timer from './Timer';
 import { motion } from "motion/react"
-import {FaMicrophone} from "react-icons/fa";
+import {FaMicrophone, FaMicrophoneSlash} from "react-icons/fa";
+import axios from 'axios';
+import { ServerUrl } from '../App';
+import { BsArrowRight } from 'react-icons/bs';   
+
 
 function Step2Interview({ interviewData, onFinish }) {
     const { interviewId, questions = [], userRole } = interviewData;
@@ -27,6 +31,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
 
     const videoRef = useRef(null);
+    const isRecognitionRunningRef = useRef(false);
 
     const currentQuestion = questions[currentIndex];
     useEffect(() => {
@@ -34,37 +39,33 @@ function Step2Interview({ interviewData, onFinish }) {
         const voices = window.speechSynthesis.getVoices();
         if (!voices.length) return;
 
-        // Try known Google voices first
         const femaleVoice = voices.find(v => 
             v.name.toLowerCase().includes("zira") ||
             v.name.toLowerCase().includes("samantha") ||
             v.name.toLowerCase().includes("female")
         );
-
         if (femaleVoice) {
             setSelectedVoice(femaleVoice);
             setVoiceGender("female");
             return;
         }
 
-        // Try known male voices
-        const maleVoice = 
-            voices.find(v => 
-                v.name.toLowerCase().includes("david") ||
-                v.name.toLowerCase().includes("mark") ||
-                v.name.toLowerCase().includes("male")
-            );
+        const maleVoice = voices.find(v => 
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("mark") ||
+            v.name.toLowerCase().includes("male")
+        );
 
-            if (maleVoice) {
-                setSelectedVoice(maleVoice);
-                setVoiceGender("male");
-                return;
-            }
-            };
-            // fallback: first voice (assume it's female)
-            setSelectedVoice(voices[0]);
-            setVoiceGender("female");
+        if (maleVoice) {
+            setSelectedVoice(maleVoice);
+            setVoiceGender("male");
+            return;
+        }
 
+        // Fallback inside loadVoices block
+        setSelectedVoice(voices[0]);
+        setVoiceGender("female");
+    }; 
             loadVoices();
                 window.speechSynthesis.onvoiceschanged = loadVoices;
         }, []);
@@ -93,14 +94,19 @@ function Step2Interview({ interviewData, onFinish }) {
 
                 utterance.onstart = () => {
                     setIsAiPlaying(true);
+                    stopMic(); // Stop mic when AI starts speaking
                         videoRef.current?.play();
                 };
 
                 utterance.onend = () => {
   
                         videoRef.current?.pause();
-                        videoRef.current.currentTime = 0;
+                            if (videoRef.current) {
+                                videoRef.current.currentTime = 0;
+                            }
                         setIsAiPlaying(false);
+
+                        if(isMicOn) startMic(); // Restart mic if it was on before
 
                         setTimeout(() => {
                           setSubtitle(""); // Clear subtitle after speech ends
@@ -113,13 +119,193 @@ function Step2Interview({ interviewData, onFinish }) {
                 window.speechSynthesis.speak(utterance);
             });
         };
+        useEffect(() => {
+            if (!selectedVoice) return;
+
+            const runIntro = async () => {
+                if(isIntroPhase) {
+                const { interviewId, questions = [], userRole, userName = "Candidate" } = interviewData;
+
+                await speakText(
+                "I'll ask you a few questions. Just answer naturally, take your time. Let's begin."
+                );
+
+                setIsIntroPhase(false);}
+                else if (currentQuestion){
+                    await new Promise(r => setTimeout(r, 800)); 
+                    // if last ques (hard level)
+                    if (currentIndex === questions.length - 1) {
+                        await speakText(
+                            "This is the last question. Give it your best shot!"
+                        );
+                    }
+                    await speakText(currentQuestion.question);
+                    if(isMicOn){ 
+                        startMic(); // Start mic after question is spoken
+                    }
+                }
+            }
+            runIntro();
+
+            }, [selectedVoice , isIntroPhase,currentIndex]);
+
+            useEffect(() => {
+                if (isIntroPhase) return;
+                if (!currentQuestion) return;
+                // if(isSubmitting) return;
+                const timer = setInterval(() => {
+                    setTimeLeft((prev) => {
+                    if (prev <= 1) {
+                        clearInterval(timer);
+                        return 0;
+                    }
+                    return prev - 1;
+                    });
+                }, 1000);
+
+                return () => clearInterval(timer);
+                }, [isIntroPhase, currentIndex]);
+
+                
+                useEffect(() => {
+                    if (currentQuestion) {
+                        setTimeLeft(currentQuestion.timeLimit || 60);
+                    }
+                }, [currentIndex, isIntroPhase]);
+                useEffect(() => {
+                if (!("webkitSpeechRecognition" in window)) return;
+
+                const recognition = new  window.webkitSpeechRecognition();
+
+                recognition.lang = "en-US";
+                recognition.continuous = true;
+                recognition.interimResults = false;
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    setAnswer((prev) => prev + " " + transcript);
+                };
+                recognition.onend = () => {
+                    isRecognitionRunningRef.current = false;
+                };
+
+                recognitionRef.current = recognition;
+                }, []);
+                const startMic = () => {
+                    if (
+                        recognitionRef.current &&
+                        !isAiPlaying &&
+                        !isRecognitionRunningRef.current
+                    ) {
+                        try {
+                            recognitionRef.current.start();
+                            isRecognitionRunningRef.current = true;
+                        } catch (err) {
+                            console.warn("Speech recognition couldn't start:", err);
+                        }
+                    }
+                };
+                
+                const stopMic = () => {
+                    if (recognitionRef.current) {
+                        recognitionRef.current.stop();
+                    }
+                };
+            const toggleMic = () => {
+                if (isMicOn) {
+                    stopMic();
+                } else {
+                    startMic();
+                }
+                setIsMicOn(!isMicOn);
+            };
+
+            const submitAnswer = async () => {
+                if (isSubmitting) return;
+                stopMic(); // Stop mic when submitting
+                setIsSubmitting(true);
+            
+            try {
+                const result= await axios.post(
+                    ServerUrl + `/api/interview/${interviewId}/submit-answer`, {
+                        interviewId,
+                        questionIndex: currentIndex,
+                        answer,
+                        timeTaken: currentQuestion.timeLimit - timeLeft
+                    },
+                    {
+                        withCredentials: true
+                    }
+                );
+                setFeedback(result.data.feedback);
+                speakText(result.data.feedback);
+                setIsSubmitting(false);
+            }
+            catch(error) {
+                console.log(error);
+                setIsSubmitting(false);
+            }
+        }
+        const handleNext = async () => {
+            // Clear previous answer and feedback
+            setAnswer("");
+            setFeedback("");
+
+            // Check if this was the last question
+            if (currentIndex + 1 >= questions.length) {
+                finishInterview();
+                return;
+            }
+
+            // Speak transition message
+            await speakText("Alright, let's move to the next question.");
+
+            // Move to next question
+            setCurrentIndex((prevIndex) => prevIndex + 1);
+
+        
+        };
+        const finishInterview = async () => {
+            stopMic();
+            setIsMicOn(false);
+            try {
+                const result = await axios.post(ServerUrl + "/api/interview/finish",
+                    { interviewId },
+                    { withCredentials: true }
+                );
+                onFinish(result.data
+                );
+            } catch (error) {
+                console.log(error);
+            }
+            };
+
+            useEffect(() => {
+                if (isIntroPhase) return;
+                if (!currentQuestion) return;
+
+                if (timeLeft === 0 && !isSubmitting && !feedback) {
+                    submitAnswer();
+                    }
+                }, [timeLeft]);
+
+                useEffect(() => {
+                return () => {
+                    if (recognitionRef.current) {
+                    recognitionRef.current.stop();
+                    recognitionRef.current.abort();
+                    }
+                    window.speechSynthesis.cancel();
+                }
+                }, []);
+
 
 
           const videoSource = voiceGender === "male" ? maleVideo : femaleVideo;
     return (
-        <div className='min-h-screen bg-linear-to-br from-emerald-50 via-white to-teal-100 flex items-center justify-center p-4 sm:p-6'>
+        <div className='min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-100 flex items-center justify-center p-4 sm:p-6'>
 
-            <div className='w-full max-w-350 min-h-[80vh] bg-white rounded-3xl shadow-2xl border border-gray-200 flex flex-col lg:flex-row overflow-hidden'>
+            <div className='w-full max-w-[1200] min-h-[80vh] bg-white rounded-3xl shadow-2xl border border-gray-200 flex flex-col lg:flex-row overflow-hidden'>
 
                 {/* Video section */}
                 <div className='w-full lg:w-[35%] bg-white flex flex-col items-center p-6 space-y-6 border-r border-gray-200'>
@@ -137,6 +323,15 @@ function Step2Interview({ interviewData, onFinish }) {
                         />
 
                     </div>
+
+                    {/* subtitle */}
+                    {subtitle && (
+                    <div className='w-full max-w-md bg-gray-50 border
+                         border-gray-200 rounded-xl p-4 shadow-sm'>
+                        <p className='text-gray-700 text-sm sm:text-base 
+                            font-medium text-center leading-relaxed'>{subtitle}</p>
+                    </div>
+                    )}
 
                     {/* Timer Area */}
                     <div className='w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-md p-6 space-y-5'>
@@ -167,7 +362,7 @@ function Step2Interview({ interviewData, onFinish }) {
                         <div className='grid grid-cols-2 gap-6 text-center'>
                         <div>
                             <span className='text-2xl font-bold text-emerald-600'>{currentIndex + 1}</span>
-                            <span className='text-xs text-gray-400'>Current Questions</span>
+                            <span className='text-xs text-gray-400'>Current Question</span>
                         </div>
                         <div className='h-px bg-gray-200'></div>
                         <div>
@@ -186,7 +381,8 @@ function Step2Interview({ interviewData, onFinish }) {
                   </h2>
 
                   {/* Question */}
-                  <div className='relative mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200 shadow-sm'>
+                  {!isIntroPhase && (
+                      <div className='relative mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200 shadow-sm'>
 
                       <p className='text-xs sm:text-sm text-gray-400 mb-2'>
                           Question {currentIndex + 1} of {questions.length}
@@ -196,39 +392,67 @@ function Step2Interview({ interviewData, onFinish }) {
                             {currentQuestion?.question}
                       </div>
 
-                  </div>
-
+                  </div>)
+}
                   {/* Answer */}
                   <textarea
-                    value={answer}
+                     placeholder="Type your answer here..."
                     onChange={(e) => setAnswer(e.target.value)}
-                    placeholder="Type your answer here..."
+                    value={answer}
                     className="flex-1 min-h-[200px] bg-gray-100 p-4 sm:p-6 rounded-2xl 
                     resize-none outline-none border border-gray-200 
                     focus:ring-2 focus:ring-emerald-500 transition text-gray-800"
                 />
 
                   {/* Buttons */}
-                  <div className='flex items-center gap-4 sm:gap-6 mt-6'>
+              {!feedback ? (
+                    <div className="flex items-center gap-4 sm:gap-6 mt-6">
 
-                      <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          className='w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center 
-                          rounded-full bg-black text-white shadow-lg'
-                      >
-                          <FaMicrophone size={20} />
-                      </motion.button>
+                        <motion.button
+                            onClick={toggleMic}
+                            whileTap={{ scale: 0.9 }}
+                            className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center 
+                                    rounded-full bg-black text-white shadow-lg"
+                        >
+                            {isMicOn ? <FaMicrophone size={20} /> : <FaMicrophoneSlash size={20}  />}
+                        </motion.button>
 
-                      <motion.button
-                          whileTap={{ scale: 0.95 }}
-                          className='flex-1 bg-gradient-to-r from-emerald-600 to-teal-500 
-                          text-white py-3 sm:py-4 rounded-2xl shadow-lg 
-                          hover:opacity-90 transition font-semibold'
-                      >
-                          Submit Answer
-                      </motion.button>
+                        <motion.button
+                            onClick={submitAnswer}
+                            disabled={isSubmitting}
+                            whileTap={{ scale: 0.95 }}
+                            className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-500 
+                                    text-white py-3 sm:py-4 rounded-2xl shadow-lg 
+                                    hover:opacity-90 transition font-semibold 
+                                    disabled:bg-gray-500"
+                        >
+                            {isSubmitting ? "Submitting..." : "Submit Answer"}
+                        </motion.button>
 
-                  </div>
+                    </div>
+                ) : (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="mt-6 bg-emerald-50 border border-emerald-200 
+                                p-3 rounded-xl shadow-sm"
+                    >
+                        <p className="text-emerald-700 font-medium mb-4">
+                            {feedback}
+                        </p>
+
+                        <button
+                                onClick={handleNext}
+                            className="w-full bg-gradient-to-r from-emerald-600 
+                                    to-teal-500 text-white py-3 rounded-xl 
+                                    shadow-md hover:opacity-90 transition 
+                                    flex items-center justify-center gap-1"
+                        >
+                            Next Question <BsArrowRight  size={18} />
+                        </button>
+
+                    </motion.div>
+                )}
 
               </div>
             </div>
