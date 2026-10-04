@@ -5,8 +5,8 @@ const isAuth = (req, res, next) => {
     const { token } = req.cookies;
 
     if (!token) {
-      return res.status(400).json({
-        message: "User does not have token"
+      return res.status(401).json({
+        message: "User is not authenticated",
       });
     }
 
@@ -15,19 +15,20 @@ const isAuth = (req, res, next) => {
       process.env.JWT_SECRET
     );
 
-    if (!verifyToken) {
-      return res.status(400).json({
-        message: "User does not have a valid token"
+    if (!verifyToken || !verifyToken.userId) {
+      return res.status(401).json({
+        message: "Invalid authentication token",
       });
     }
 
     req.userId = verifyToken.userId;
 
     next();
-
   } catch (error) {
-    return res.status(500).json({
-      message: `IsAuth error ${error}`
+    console.error("IsAuth error:", error.message);
+
+    return res.status(401).json({
+      message: "Invalid or expired authentication token",
     });
   }
 };

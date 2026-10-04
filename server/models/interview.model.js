@@ -1,66 +1,63 @@
 import mongoose from "mongoose";
 
+const questionSchema = new mongoose.Schema({
+  question: String,
+  difficulty: String,
+  timeLimit: Number,
+  answer: String,
+  feedback: String,
+  score: { type: Number, default: 0 },
+  confidence: { type: Number, default: 0 },
+  communication: { type: Number, default: 0 },
+  correctness: { type: Number, default: 0 },
+});
+
 const interviewSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
 
     jobRole: {
       type: String,
-      required: true
+      required: true,
     },
 
     experience: {
       type: Number,
-      required: true
+      required: true,
     },
 
-    interviewType: {
+    mode: {
       type: String,
-      required: true
+      enum: ["HR", "Technical"],
+      required: true,
     },
 
     resume: {
-      type: String
+      type: String,
     },
 
     resumeText: {
-      type: String
+      type: String,
     },
 
-    questions: [
-      {
-        question: {
-          type: String
-        },
-
-        answer: {
-          type: String,
-          default: ""
-        },
-
-        feedback: {
-          type: String,
-          default: ""
-        }
-      }
-    ],
+    questions: [questionSchema],
 
     score: {
       type: Number,
-      default: 0
+      default: 0,
     },
 
     report: {
       type: String,
-      default: ""
-    }
+      default: "",
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 

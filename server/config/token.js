@@ -1,4 +1,5 @@
-import jwt from "jsonwevtoken"
+import jwt from "jsonwebtoken"
+
 
 const genToken = async (userId) => {
   try {

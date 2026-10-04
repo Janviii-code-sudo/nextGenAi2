@@ -1,16 +1,22 @@
 import fs from "fs/promises";
 import path from "path";
+import mammoth from "mammoth";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
+import { deductCredits } from "./user.controller.js";
 import Interview from "../models/interview.model.js";
 import askAi from "../services/openRouter.services.js";
+
+/* =========================
+   RESUME TEXT EXTRACTION
+========================= */
 
 const extractPdfText = async (filePath) => {
   try {
     const data = await fs.readFile(filePath);
 
     const pdf = await pdfjsLib.getDocument({
-      data: new Uint8Array(data)
+      data: new Uint8Array(data),
     }).promise;
 
     let text = "";
@@ -32,32 +38,117 @@ const extractPdfText = async (filePath) => {
 
     return text;
   } catch (error) {
-    console.error(
-      "PDF extraction error:",
-      error.message
-    );
-
+    console.error("PDF extraction error:", error.message);
     throw new Error("Failed to read resume PDF");
   }
 };
 
-export const startInterview = async (req, res) => {
+const extractDocxText = async (filePath) => {
+  try {
+    const result = await mammoth.extractRawText({
+      path: filePath,
+    });
+
+    return result.value || "";
+  } catch (error) {
+    console.error("DOCX extraction error:", error.message);
+    throw new Error("Failed to read resume DOCX");
+  }
+};
+
+const extractResumeText = async (filePath) => {
+  const extension = path.extname(filePath).toLowerCase();
+
+  if (extension === ".pdf") {
+    return extractPdfText(filePath);
+  }
+
+  if (extension === ".docx") {
+    return extractDocxText(filePath);
+  }
+
+  if (extension === ".doc") {
+    throw new Error(
+      "Old .doc files are not supported. Please upload a PDF or DOCX resume."
+    );
+  }
+
+  throw new Error(
+    "Unsupported resume format. Please upload a PDF or DOCX file."
+  );
+};
+
+/* =========================
+   ANALYZE RESUME
+========================= */
+
+export const analyzeResume = async (req, res) => {
   let uploadedFilePath = null;
 
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        message: "Resume file is required",
+      });
+    }
+
+    uploadedFilePath = req.file.path;
+
+    const resumeText = await extractResumeText(req.file.path);
+
+    console.log(
+      "Resume received:",
+      req.file.originalname
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Resume analyzed successfully",
+
+      role: "Software Engineer",
+
+      // Keep this as a STRING because the teammate frontend
+      // uses experience.replace(...)
+      experience: "0",
+
+      projects: [],
+      skills: [],
+      resumeText,
+    });
+  } catch (error) {
+    console.error("Resume analysis error:", error);
+
+    return res.status(500).json({
+      message: "Failed to analyze resume",
+      error: error.message,
+    });
+  } finally {
+    if (uploadedFilePath) {
+      try {
+        await fs.unlink(uploadedFilePath);
+
+        console.log("Temporary resume deleted");
+      } catch (error) {
+        console.log(
+          "Could not delete uploaded resume:",
+          error.message
+        );
+      }
+    }
+  }
+};
+
+/* =========================
+   GENERATE QUESTIONS
+========================= */
+
+export const generateQuestions = async (req, res) => {
   try {
     const {
       jobRole,
       experience,
-      interviewType
+      interviewType,
     } = req.body;
-
-    const userId = req.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "User is not authenticated"
-      });
-    }
 
     if (
       !jobRole ||
@@ -66,32 +157,133 @@ export const startInterview = async (req, res) => {
     ) {
       return res.status(400).json({
         message:
-          "Job role, experience and interview type are required"
+          "jobRole, experience and interviewType are required",
       });
     }
 
-    if (!req.file) {
-      return res.status(400).json({
-        message: "Resume PDF is required"
-      });
-    }
+    const questions = [
+      {
+        question:
+          `Tell me about yourself and your experience related to ${jobRole}.`,
+        difficulty: "Easy",
+        timeLimit: 120,
+      },
+      {
+        question:
+          `What are the most important skills you have for a ${jobRole} position?`,
+        difficulty: "Easy",
+        timeLimit: 120,
+      },
+      {
+        question:
+          "Describe a challenging project you worked on and how you solved the problem.",
+        difficulty: "Medium",
+        timeLimit: 150,
+      },
+      {
+        question:
+          `How would you approach solving a difficult problem in a ${interviewType} interview?`,
+        difficulty: "Medium",
+        timeLimit: 150,
+      },
+      {
+        question:
+          `Why do you think you are a good fit for this ${jobRole} role?`,
+        difficulty: "Medium",
+        timeLimit: 120,
+      },
+    ];
 
-    uploadedFilePath = req.file.path;
-
-    const resumeText = await extractPdfText(
-      req.file.path
+    return res.status(200).json({
+      success: true,
+      questions,
+    });
+  } catch (error) {
+    console.error(
+      "Generate questions error:",
+      error
     );
 
-    if (!resumeText.trim()) {
-      return res.status(400).json({
-        message: "Could not extract text from resume"
+    return res.status(500).json({
+      message:
+        "Failed to generate interview questions",
+      error: error.message,
+    });
+  }
+};
+
+/* =========================
+   START INTERVIEW
+========================= */
+
+export const startInterview = async (req, res) => {
+  let uploadedFilePath = null;
+
+  try {
+    const {
+      jobRole,
+      experience,
+      interviewType,
+    } = req.body;
+
+    const userId = req.userId;
+
+    console.log(
+      "START INTERVIEW REQUEST:",
+      {
+        jobRole,
+        experience,
+        interviewType,
+        hasResume: !!req.file,
+        userId,
+      }
+    );
+
+    if (!userId) {
+      return res.status(401).json({
+        message: "User is not authenticated",
       });
+    }
+
+    if (
+      !jobRole ||
+      experience === undefined ||
+      experience === "" ||
+      !interviewType
+    ) {
+      return res.status(400).json({
+        message:
+          "Job role, experience and interview type are required",
+      });
+    }
+
+    let resumeText = "";
+    let resumeFileName = "";
+
+    if (req.file) {
+      uploadedFilePath = req.file.path;
+
+      resumeFileName = path.basename(
+        req.file.path
+      );
+
+      try {
+        resumeText =
+          await extractResumeText(req.file.path);
+      } catch (error) {
+        console.error(
+          "Resume extraction failed:",
+          error.message
+        );
+
+        resumeText = "";
+      }
     }
 
     const prompt = `
-You are an expert technical interviewer.
+You are an expert interview question generator.
 
-Analyze the following resume.
+Create interview questions for a candidate.
 
 Job Role:
 ${jobRole}
@@ -103,29 +295,59 @@ Interview Type:
 ${interviewType}
 
 Resume:
-${resumeText}
+${resumeText || "No resume was provided."}
 
-Return a JSON object with exactly these fields:
+Generate exactly 5 interview questions.
 
-{
-  "experienceSummary": "",
-  "projects": [],
-  "skills": [],
-  "questions": []
-}
-
-The questions array should contain 5 interview questions
-that are relevant to the candidate's resume and job role.
+The questions should be relevant to:
+- the job role
+- the candidate's experience
+- the interview type
+- the resume, if provided
 
 Return ONLY valid JSON.
+
+Required format:
+
+{
+  "questions": [
+    {
+      "question": "",
+      "difficulty": "Easy",
+      "timeLimit": 120
+    }
+  ]
+}
+
+Rules:
+- Exactly 5 questions
+- difficulty must be Easy, Medium, or Hard
+- timeLimit must be a number in seconds
+- Do not include markdown
+- Return only JSON
 `;
 
-    const aiResponse = await askAi(prompt);
+    let aiResponse;
+
+    try {
+      aiResponse = await askAi(prompt);
+    } catch (error) {
+      console.error(
+        "AI question generation error:",
+        error.message
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to generate interview questions",
+        error: error.message,
+      });
+    }
 
     let aiData;
 
     try {
-      const cleanedResponse = aiResponse
+      const cleanedResponse = String(aiResponse)
         .replace(/```json/g, "")
         .replace(/```/g, "")
         .trim();
@@ -137,33 +359,53 @@ Return ONLY valid JSON.
         error.message
       );
 
-      aiData = {
-        experienceSummary: aiResponse,
-        projects: [],
-        skills: [],
-        questions: []
-      };
+      console.error(
+        "AI RESPONSE:",
+        aiResponse
+      );
+
+      return res.status(500).json({
+        message:
+          "AI returned an invalid question format",
+      });
     }
 
-    const questions = (aiData.questions || [])
-      .map((question) => ({
-        question:
-          typeof question === "string"
-            ? question
-            : question.question || "",
-        answer: "",
-        feedback: ""
-      }))
-      .filter(
-        (question) =>
-          question.question.trim() !== ""
-      )
-      .slice(0, 5);
+    const questions =
+      (aiData.questions || [])
+        .map((question) => ({
+          question:
+            typeof question === "string"
+              ? question
+              : question.question || "",
+
+          difficulty:
+            typeof question === "object"
+              ? question.difficulty || "Medium"
+              : "Medium",
+
+          timeLimit:
+            typeof question === "object"
+              ? Number(question.timeLimit) || 120
+              : 120,
+
+          answer: "",
+          feedback: "",
+          score: 0,
+          confidence: 0,
+          communication: 0,
+          correctness: 0,
+        }))
+        .filter(
+          (question) =>
+            question.question &&
+            question.question.trim() !== ""
+        )
+        .slice(0, 5);
 
     if (questions.length === 0) {
       return res.status(500).json({
         message:
-          "AI could not generate interview questions"
+          "AI could not generate interview questions",
       });
     }
 
@@ -171,50 +413,56 @@ Return ONLY valid JSON.
       userId,
       jobRole,
       experience: Number(experience),
-      interviewType,
-
-      resume: path.basename(
-        req.file.path
-      ),
-
+      mode: interviewType,
+      resume: resumeFileName,
       resumeText,
       questions,
       score: 0,
-      report: ""
+      report: "",
     });
-    try {
-  await deductCredits(userId, 10);
-} catch (error) {
-  await Interview.findByIdAndDelete(interview._id);
 
-  return res.status(400).json({
-    message: error.message
-  });
-}
+    let creditsLeft = null;
+
+    try {
+      const creditResult = await deductCredits(
+        userId,
+        10
+      );
+
+      if (
+        creditResult &&
+        typeof creditResult.credits === "number"
+      ) {
+        creditsLeft = creditResult.credits;
+      }
+    } catch (error) {
+      await Interview.findByIdAndDelete(
+        interview._id
+      );
+
+      return res.status(400).json({
+        message: error.message,
+      });
+    }
 
     return res.status(201).json({
+      success: true,
+
       message:
         "Interview created successfully",
 
       interviewId: interview._id,
 
+      creditsLeft,
+
       interview: {
         id: interview._id,
         jobRole: interview.jobRole,
-        experience: interview.experience,
-        interviewType:
-          interview.interviewType,
-        questions: interview.questions
+        experience: String(experience),
+        interviewType,
+        questions: interview.questions,
       },
-
-      analysis: {
-        experienceSummary:
-          aiData.experienceSummary,
-        projects: aiData.projects,
-        skills: aiData.skills
-      }
     });
-
   } catch (error) {
     console.error(
       "Start interview error:",
@@ -224,23 +472,29 @@ Return ONLY valid JSON.
     return res.status(500).json({
       message:
         error.message ||
-        "Failed to start interview"
+        "Failed to start interview",
     });
-
   } finally {
     if (uploadedFilePath) {
       try {
-        await fs.unlink(
-          uploadedFilePath
+        await fs.unlink(uploadedFilePath);
+
+        console.log(
+          "Temporary resume deleted"
         );
       } catch (error) {
         console.log(
-          "Could not delete uploaded file"
+          "Could not delete uploaded resume:",
+          error.message
         );
       }
     }
   }
 };
+
+/* =========================
+   SUBMIT ANSWER
+========================= */
 
 export const submitAnswer = async (
   req,
@@ -250,7 +504,7 @@ export const submitAnswer = async (
     const {
       interviewId,
       questionId,
-      answer
+      answer,
     } = req.body;
 
     const userId = req.userId;
@@ -258,7 +512,7 @@ export const submitAnswer = async (
     if (!userId) {
       return res.status(401).json({
         message:
-          "User is not authenticated"
+          "User is not authenticated",
       });
     }
 
@@ -269,19 +523,20 @@ export const submitAnswer = async (
     ) {
       return res.status(400).json({
         message:
-          "Interview ID, question ID and answer are required"
+          "Interview ID, question ID and answer are required",
       });
     }
 
     const interview =
       await Interview.findOne({
         _id: interviewId,
-        userId
+        userId,
       });
 
     if (!interview) {
       return res.status(404).json({
-        message: "Interview not found"
+        message:
+          "Interview not found",
       });
     }
 
@@ -290,7 +545,8 @@ export const submitAnswer = async (
 
     if (!question) {
       return res.status(404).json({
-        message: "Question not found"
+        message:
+          "Question not found",
       });
     }
 
@@ -326,13 +582,14 @@ Rules:
     let evaluation;
 
     try {
-      const cleanedResponse = aiResponse
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim();
+      const cleanedResponse =
+        aiResponse
+          .replace(/```json/g, "")
+          .replace(/```/g, "")
+          .trim();
 
-      evaluation = JSON.parse(cleanedResponse);
-
+      evaluation =
+        JSON.parse(cleanedResponse);
     } catch (error) {
       console.error(
         "Answer evaluation JSON parsing error:",
@@ -341,7 +598,7 @@ Rules:
 
       evaluation = {
         feedback: aiResponse,
-        score: 0
+        score: 0,
       };
     }
 
@@ -353,16 +610,12 @@ Rules:
     return res.status(200).json({
       message:
         "Answer evaluated successfully",
-
       questionId,
-
       feedback:
         question.feedback,
-
       score:
-        Number(evaluation.score) || 0
+        Number(evaluation.score) || 0,
     });
-
   } catch (error) {
     console.error(
       "Submit answer error:",
@@ -372,74 +625,81 @@ Rules:
     return res.status(500).json({
       message:
         error.message ||
-        "Failed to submit answer"
+        "Failed to submit answer",
     });
   }
 };
 
-export const generateInterviewReport = async (
-  req,
-  res
-) => {
-  try {
-    const { interviewId } = req.body;
-    const userId = req.userId;
+/* =========================
+   GENERATE INTERVIEW REPORT
+========================= */
 
-    if (!userId) {
-      return res.status(401).json({
-        message:
-          "User is not authenticated"
-      });
-    }
+export const generateInterviewReport =
+  async (req, res) => {
+    try {
+      const {
+        interviewId,
+      } = req.body;
 
-    if (!interviewId) {
-      return res.status(400).json({
-        message:
-          "Interview ID is required"
-      });
-    }
+      const userId = req.userId;
 
-    const interview =
-      await Interview.findOne({
-        _id: interviewId,
-        userId
-      });
+      if (!userId) {
+        return res.status(401).json({
+          message:
+            "User is not authenticated",
+        });
+      }
 
-    if (!interview) {
-      return res.status(404).json({
-        message:
-          "Interview not found"
-      });
-    }
+      if (!interviewId) {
+        return res.status(400).json({
+          message:
+            "Interview ID is required",
+        });
+      }
 
-    if (
-      !interview.questions ||
-      interview.questions.length === 0
-    ) {
-      return res.status(400).json({
-        message:
-          "No interview questions found"
-      });
-    }
+      const interview =
+        await Interview.findOne({
+          _id: interviewId,
+          userId,
+        });
 
-    const unansweredQuestions =
-      interview.questions.filter(
-        (question) =>
-          !question.answer ||
-          question.answer.trim() === ""
-      );
+      if (!interview) {
+        return res.status(404).json({
+          message:
+            "Interview not found",
+        });
+      }
 
-    if (unansweredQuestions.length > 0) {
-      return res.status(400).json({
-        message:
-          "Please answer all interview questions before generating the report"
-      });
-    }
+      if (
+        !interview.questions ||
+        interview.questions.length === 0
+      ) {
+        return res.status(400).json({
+          message:
+            "No interview questions found",
+        });
+      }
 
-    const questionsText =
-      interview.questions
-        .map(
-          (question, index) => `
+      const unansweredQuestions =
+        interview.questions.filter(
+          (question) =>
+            !question.answer ||
+            question.answer.trim() === ""
+        );
+
+      if (
+        unansweredQuestions.length > 0
+      ) {
+        return res.status(400).json({
+          message:
+            "Please answer all interview questions before generating the report",
+        });
+      }
+
+      const questionsText =
+        interview.questions
+          .map(
+            (question, index) => `
 Question ${index + 1}:
 ${question.question}
 
@@ -449,10 +709,10 @@ ${question.answer}
 AI Feedback:
 ${question.feedback}
 `
-        )
-        .join("\n");
+          )
+          .join("\n");
 
-    const prompt = `
+      const prompt = `
 You are an expert interview evaluator.
 
 Analyze the following completed interview.
@@ -464,7 +724,7 @@ Experience:
 ${interview.experience} years
 
 Interview Type:
-${interview.interviewType}
+${interview.mode}
 
 Questions and Answers:
 ${questionsText}
@@ -488,127 +748,137 @@ Rules:
 - return only valid JSON
 `;
 
-    const aiResponse = await askAi(prompt);
+      const aiResponse =
+        await askAi(prompt);
 
-    let result;
+      let result;
 
-    try {
-      const cleanedResponse = aiResponse
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim();
+      try {
+        const cleanedResponse =
+          aiResponse
+            .replace(/```json/g, "")
+            .replace(/```/g, "")
+            .trim();
 
-      result = JSON.parse(cleanedResponse);
+        result =
+          JSON.parse(cleanedResponse);
+      } catch (error) {
+        console.error(
+          "Report JSON parsing error:",
+          error.message
+        );
 
+        result = {
+          score: 0,
+          report: aiResponse,
+          strengths: [],
+          weaknesses: [],
+          recommendation: "",
+        };
+      }
+
+      const finalScore =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(result.score) || 0
+          )
+        );
+
+      interview.score = finalScore;
+      interview.report = result.report || "";
+
+      await interview.save();
+
+      return res.status(200).json({
+        message:
+          "Interview report generated successfully",
+
+        interviewId:
+          interview._id,
+
+        score: finalScore,
+
+        report:
+          result.report || "",
+
+        strengths:
+          result.strengths || [],
+
+        weaknesses:
+          result.weaknesses || [],
+
+        recommendation:
+          result.recommendation || "",
+      });
     } catch (error) {
       console.error(
-        "Report JSON parsing error:",
-        error.message
+        "Generate interview report error:",
+        error
       );
 
-      result = {
-        score: 0,
-        report: aiResponse,
-        strengths: [],
-        weaknesses: [],
-        recommendation: ""
-      };
+      return res.status(500).json({
+        message:
+          error.message ||
+          "Failed to generate interview report",
+      });
     }
+  };
 
-    const finalScore =
-      Math.max(
-        0,
-        Math.min(
-          100,
-          Number(result.score) || 0
-        )
+/* =========================
+   GET INTERVIEW REPORT
+========================= */
+
+export const getInterviewReport =
+  async (req, res) => {
+    try {
+      const userId = req.userId;
+
+      const { interviewId } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          message:
+            "User is not authenticated",
+        });
+      }
+
+      if (!interviewId) {
+        return res.status(400).json({
+          message:
+            "Interview ID is required",
+        });
+      }
+
+      const interview =
+        await Interview.findOne({
+          _id: interviewId,
+          userId,
+        });
+
+      if (!interview) {
+        return res.status(404).json({
+          message:
+            "Interview not found",
+        });
+      }
+
+      return res.status(200).json({
+        message:
+          "Interview report fetched successfully",
+        interview,
+      });
+    } catch (error) {
+      console.error(
+        "Get interview report error:",
+        error
       );
 
-    interview.score = finalScore;
-
-    interview.report =
-      result.report || "";
-
-    await interview.save();
-
-    return res.status(200).json({
-      message:
-        "Interview report generated successfully",
-
-      interviewId:
-        interview._id,
-
-      score: finalScore,
-
-      report:
-        result.report || "",
-
-      strengths:
-        result.strengths || [],
-
-      weaknesses:
-        result.weaknesses || [],
-
-      recommendation:
-        result.recommendation || ""
-    });
-
-  } catch (error) {
-    console.error(
-      "Generate interview report error:",
-      error
-    );
-
-    return res.status(500).json({
-      message:
-        error.message ||
-        "Failed to generate interview report"
-    });
-  }
-};
-export const getInterviewReport = async (req, res) => {
-  try {
-    const userId = req.userId;
-    const { interviewId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "User is not authenticated"
+      return res.status(500).json({
+        message:
+          error.message ||
+          "Failed to fetch interview report",
       });
     }
-
-    if (!interviewId) {
-      return res.status(400).json({
-        message: "Interview ID is required"
-      });
-    }
-
-    const interview = await Interview.findOne({
-      _id: interviewId,
-      userId
-    });
-
-    if (!interview) {
-      return res.status(404).json({
-        message: "Interview not found"
-      });
-    }
-
-    return res.status(200).json({
-      message: "Interview report fetched successfully",
-      interview
-    });
-
-  } catch (error) {
-    console.error(
-      "Get interview report error:",
-      error
-    );
-
-    return res.status(500).json({
-      message:
-        error.message ||
-        "Failed to fetch interview report"
-    });
-  }
-};
+  };
